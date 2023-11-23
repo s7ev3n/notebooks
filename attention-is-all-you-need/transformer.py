@@ -1,5 +1,5 @@
 import torch
-imort torch.nn as nn
+import torch.nn as nn
 
 def attention(query, key, value, attn_mask=None, dropout=None):
     """Scaled Dot Product Attention.
@@ -34,7 +34,7 @@ def attention(query, key, value, attn_mask=None, dropout=None):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, num_heads, dropout=0.1)：
+    def __init__(self, d_model, num_heads, dropout=0.1):
         super(MultiHeadAttention, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
@@ -60,29 +60,34 @@ class MultiHeadAttention(nn.Module):
         k = k.transpose(-2, -3)
         v = v.transpose(-2, -3)
         
-        attn_value, attn_weight = attention(q, k, v, attn_mask=mask, dropout=self.dropout)
-        # attn_value -> (b, num_heads, t, d_k), attn_weight -> (b, num_heads, t, t)
-        attn_value = attn_value.transpose(-2, -3) # -> (b, t, num_heads, d_k)
-        attn_value = attn_value.view(b, t, -1) # -> (b, t, num_heads * d_k)
+        x, attn = attention(q, k, v, attn_mask=mask, dropout=self.dropout)
+        # x -> (b, num_heads, t, d_k), attn -> (b, num_heads, t, t)
+        x = x.transpose(-2, -3) # -> (b, t, num_heads, d_k)
+        x = x.view(b, t, -1) # -> (b, t, num_heads * d_k)
         
-        res = self.l(attn_value) # -> (b, t, d_model)
+        res = self.l(x) # -> (b, t, d_model)
     
         return res 
 
 
 class SublayerResidual(nn.Module):
-    def __init__(self, sublayer, d_model=512, dropout=0.1):
+    def __init__(self, d_model=512, dropout=0.1):
         super(SublayerResidual, self).__init__()
-        self.sublayer = sublayer
         self.ln = nn.LayerNorm(d_model) 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
-        return x + self.dropout(self.sublayer(x))
+    def forward(self, x, sublayer):
+        """
+        Note here is pre-norm formulation:
+        Origin paper is LayerNorm(x+sublayer(x)), now is x + sublayer(LayerNorm(x))
+
+        Reference: https://youtu.be/kCc8FmEb1nY?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ&t=5723
+        """
+        return x + self.dropout(sublayer(self.ln(x)))
 
 class PointwiseFeedForward(nn.Module):
     def __init__(self, d_model=512,  d_f=2048):
-        super(Pointwise, self).__init__()
+        super(PointwiseFeedForward, self).__init__()
         self.d_model = d_model
         self.d_f = d_f
         self.fc1 = nn.Linear(d_model, d_f, bias=True)
@@ -96,4 +101,59 @@ class PointwiseFeedForward(nn.Module):
 
         return x
 
+class EncoderBlock(nn.Module):
+    def __init__(self, d_model, multi_head_attention, feedforward, dropout=0.1):
+        self.attention = multi_head_attention 
+        self.feedforward = feedforward
+        self.residual1 = SublayerResidual(d_model, dropout)
+        self.residual2 = SublayerResidual(d_model, dropout)
 
+    def forward(self, x, mask):
+        x = self.residual1(x, lambda x : self.attention(x, x, x, mask))
+        x = self.residual2(x, self.feedforward)
+
+        return x
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, d_model, self_attn, cross_attn, feedforward, dropout=0.1):
+        self.self_attn = self_attn
+        self.cross_attn = cross_attn
+        self.feedforward = feedforward
+        self.residual1 = SublayerResidual(d_model, dropout)
+        self.residual2 = SublayerResidual(d_model, dropout)
+        self.residual3 = SublayerResidual(d_model, dropout)
+
+    def forward(self, x, cross_x, mask_x, mask_cross):
+        x = self.residual1(x, lambda x : self.self_attn(x, x, x, mask_x))
+        x = self.residual2(x, lambda x : self.cross_attn(x, cross_x, cross_x, mask_cross))
+        x = self.residual3(x, self.feedforward)
+
+        return x
+
+class Encoder(nn.Module):
+    def __init__(self, encoder_layer, n_layer=6):
+        super(Encoder, self).__init__()
+        self.layers = nn.ModuleList([encoder_layer for _ in range(n_layer)])
+
+    def forward(self, x, mask):
+        for layer in self.layers:
+            x = layer(x, mask)
+        return x
+
+class Decoder(nn.Module):
+    def __init__(self, decoder_layer, n_layer=6):
+        super(Decoder, self).__init__()
+        self.layers = nn.ModuleList([decoder_layer for _ in range(n_layer)])
+
+    def forward(self, x, cross_x, mask_x, mask_cross):
+        for layer in self.layers:
+            x = layer(x, cross_x, mask_x, mask_cross)
+        return x
+
+def positional_encoding(x):
+    # TODO:
+
+
+def masking(dim):
+    # TODO: masking
