@@ -25,7 +25,7 @@ def attention(query, key, value, attn_mask=None, dropout=None):
         # 3. For computation stability, to avoid underflow
         score = score.masked_fill(attn_mask == 0, -1e9)
     
-    attn = torch.nn.functional.softmax(score, dim=-1)
+    attn = nn.functional.softmax(score, dim=-1)
     if dropout is not None:
         # TODO: Why dropout here, does the original paper has it ?
         attn = dropout(attn)
@@ -151,9 +151,35 @@ class Decoder(nn.Module):
             x = layer(x, cross_x, mask_x, mask_cross)
         return x
 
-def positional_encoding(x):
-    # TODO:
+class PositionEncoding(nn.Module):
+    def __init__(self, max_len, d_model):
+        super(PositionEncoding, self).__init__()
+        self.max_len = max_len
+        self.d_model = d_model
 
+    def forward(self, x):
+        # x: (b, t, d_model)
+        pe = torch.zeros(self.max_len, self.d_model)
+        pos = torch.arange(0, self.max_len).unsqueeze(0) # (1, max_len)
+        demonitor = torch.pow(10000, torch.arange(0, self.max_len, 2) / self.d_model)
+        # pos/demonitor is broadcastable
+        pe[:, 0::2] = torch.sin(pos / demonitor) # (max_len, d_model / 2)
+        pe[:, 1::2] = torch.cos(pos / demonitor)
 
-def masking(dim):
-    # TODO: masking
+        return x + pe
+
+def masking(max_len: int):
+    """Masking of self-attention.
+    The masking has many names: causal masking, look ahead masking, subsequent_masking
+    and decoder masking, etc. But the main purpose is one, mask out after the position i 
+    to prevent leaking of future information in the transformer decoder.
+    Usually, the mask is a triangular matrix where the elements below diagnal is True and 
+    above is False. 
+
+    Args:
+        max_len (int): max length of 
+    """
+
+    mask = torch.triu(torch.ones((1, max_len, max_len)), diagonal=1).type(torch.int8)
+    
+    return mask == 0
