@@ -78,10 +78,19 @@ class SublayerResidual(nn.Module):
 
     def forward(self, x, sublayer):
         """
-        Note here is pre-norm formulation:
-        Origin paper is LayerNorm(x+sublayer(x)), now is x + sublayer(LayerNorm(x))
+        Detail 1:
+        Note implementation here is pre-norm formulation:
+            x + sublayer(LayerNorm(x))
+        Origin paper is LayerNorm(x+sublayer(x)) which is called post-norm. 
+        There are literatures about the pros and cons of pre-norm and post-norm[1,2].
 
-        Reference: https://youtu.be/kCc8FmEb1nY?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ&t=5723
+        Detail 2:
+        We apply dropout to the output of each sub-layer, before it is added to the 
+        sub-layer input and normalized.
+
+        Reference: 
+        1. https://youtu.be/kCc8FmEb1nY?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ&t=5723
+        2. https://kexue.fm/archives/9009
         """
         return x + self.dropout(sublayer(self.ln(x)))
 
@@ -152,34 +161,65 @@ class Decoder(nn.Module):
         return x
 
 class PositionEncoding(nn.Module):
-    def __init__(self, max_len, d_model):
+    """PositionEncoding
+    Positional encoding will sum with input embedding to give input embedding order.
+    Positional encoding is given by the following equation:
+    PE(pos, 2i)     = sin(pos / (10000 ^ (2i / d_model))) # for given position odd end even index are alternating
+    PE(pos, 2i + 1) = cos(pos / (10000 ^ (2i / d_model)))
+    where pos is position in sequence and i and index in d_model.
+    
+    The positional encoding implementation is a matrix of (max_len, d_model), 
+    this matrix is not updated by SGD, it is implemented as a buffer of nn.Module which 
+    is the state of of the nn.Module.
+
+    Detail 1:
+    In addition, we apply dropout to the sums of the embeddings and the positional encodings 
+    in both the encoder and decoder stacks. For the base model, we use a rate of P_drop = 0.1
+    """
+    def __init__(self, max_len, d_model, dropout=0.1):
         super(PositionEncoding, self).__init__()
-        self.max_len = max_len
-        self.d_model = d_model
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model, requires_grad=False)
+        pos = torch.arange(0, self.max_len).unsqueeze(1) # (max_len, 1)
+        demonitor = torch.pow(10000, torch.arange(0, self.max_len, 2) / self.d_model) # pos/demonitor is broadcastable
+        
+        pe[:, 0::2] = torch.sin(pos / demonitor)
+        pe[:, 1::2] = torch.cos(pos / demonitor)
+        pe = pe.unsqueeze(0) # (1, max_len, d_model)
+        self.register_buffer('pe', pe)
 
     def forward(self, x):
         # x: (b, t, d_model)
-        pe = torch.zeros(self.max_len, self.d_model)
-        pos = torch.arange(0, self.max_len).unsqueeze(0) # (1, max_len)
-        demonitor = torch.pow(10000, torch.arange(0, self.max_len, 2) / self.d_model)
-        # pos/demonitor is broadcastable
-        pe[:, 0::2] = torch.sin(pos / demonitor) # (max_len, d_model / 2)
-        pe[:, 1::2] = torch.cos(pos / demonitor)
+        # self.pe[:, :x.size(1)] will return a new tensor, not buffer anymore
+        # by default the new tensor's requires_grad is Fasle, but here we refer
+        # to The Annotated Transformer, use in_place requires_grad_(False)
+        x = x + self.pe[:, : x.size(1)].requires_grad_(False) # max_len is much longer than t
+        return self.dropout(x)
 
-        return x + pe
-
-def masking(max_len: int):
+def masking(seq_len):
     """Masking of self-attention.
-    The masking has many names: causal masking, look ahead masking, subsequent_masking
-    and decoder masking, etc. But the main purpose is one, mask out after the position i 
+    The masking has many names: causal masking, look ahead masking, subsequent masking
+    and decoder masking, etc. But the main purpose is the same, mask out after the position i 
     to prevent leaking of future information in the transformer decoder.
     Usually, the mask is a triangular matrix where the elements below diagnal is True and 
     above is False. 
 
     Args:
-        max_len (int): max length of 
+        seq_len (int): sequence length 
     """
 
-    mask = torch.triu(torch.ones((1, max_len, max_len)), diagonal=1).type(torch.int8)
+    mask = torch.triu(torch.ones((1, seq_len,seq_len)), diagonal=1).type(torch.int8)
     
     return mask == 0
+
+
+class Transformer(nn.Module):
+    """Transformer.
+
+    """
+    
+    def __init__(self, ):
+        super(Transformer, self).__init__()
+
+    
