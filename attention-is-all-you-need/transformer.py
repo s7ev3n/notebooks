@@ -1,3 +1,9 @@
+"""
+Transformer implementation for understanding and practice.
+"""
+
+import copy
+import math
 import torch
 import torch.nn as nn
 
@@ -5,7 +11,39 @@ def attention(query, key, value, attn_mask=None, dropout=None):
     """Scaled Dot Product Attention.
 
     Attention(Q, K, V) = softmax(Q * K.T / sqrt(d_k)) * V
+
+    Attetion operation: a query vector (1, c) calcuates its similarity with
+    a sequence vectors (t, c), and obtained its output (1,c) by a weighted 
+    sum over a sequence of value vectors (t, c), where "weighted" is the 
+    similarity. If you have a sequence of query vectors (t, c), the output
+    is a sequence (t, c), where each position (1, c) in the output is the 
+    weighted sum given by the key and value sequence vectors.
+
+    Example, let us see the attention weight and value vector multiply matrix,
     
+    attention weight:
+    [[1.0 , 0.0 , 0.0],
+     [0.5 , 0.5 , 0.0],
+     [0.33, 0.33, 0.33]]
+
+    value vector (t, c), each row is value vector
+    [[1, 2],
+     [4, 5],
+     [7, 8]]
+    
+    The result is 
+    [[1.0, 2.0],
+     [2.5, 3.5],
+     [4.0, 5.0]]
+
+    The element (column) of specific row in attention weight sepcifies how each row of
+    value vector is summed to obtain specific row of output. For instance, in the second 
+    row of attention weight is [0.5, 0.5, 0.0] it specifies the second sequence in the 
+    output is obtained by 0.5 the first sequence and 0.5 the second sequence of in the 
+    value vector.
+    PS: see video 
+    https://www.youtube.com/watch?v=kCc8FmEb1nY&list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ&index=7&t=2533s
+
     Params:
         query: (b, t, d_k)
         key  : (b, t, d_k)
@@ -32,7 +70,22 @@ def attention(query, key, value, attn_mask=None, dropout=None):
 
     return torch.matmul(attn, value), attn
 
+def causal_masking(seq_len):
+    """Masking of self-attention.
 
+    The masking has many names: causal masking, look ahead masking, subsequent masking
+    and decoder masking, etc. But the main purpose is the same, mask out after the 
+    position i to prevent leaking of future information in the transformer decoder. 
+    Usually, the mask is a triangular matrix where the elements below diagnal is True
+    and above is False. 
+
+    Args:
+        seq_len (int): sequence length 
+    """
+
+    mask = torch.triu(torch.ones((1, seq_len,seq_len)), diagonal=1).type(torch.int8)
+    
+    return mask == 0
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads, dropout=0.1):
         super(MultiHeadAttention, self).__init__()
@@ -110,8 +163,9 @@ class PointwiseFeedForward(nn.Module):
 
         return x
 
-class EncoderBlock(nn.Module):
+class EncoderLayer(nn.Module):
     def __init__(self, d_model, multi_head_attention, feedforward, dropout=0.1):
+        super(EncoderLayer, self).__init__()
         self.attention = multi_head_attention 
         self.feedforward = feedforward
         self.residual1 = SublayerResidual(d_model, dropout)
@@ -124,8 +178,9 @@ class EncoderBlock(nn.Module):
         return x
 
 
-class DecoderBlock(nn.Module):
+class DecoderLayer(nn.Module):
     def __init__(self, d_model, self_attn, cross_attn, feedforward, dropout=0.1):
+        super(DecoderLayer, self).__init__()
         self.self_attn = self_attn
         self.cross_attn = cross_attn
         self.feedforward = feedforward
@@ -133,9 +188,9 @@ class DecoderBlock(nn.Module):
         self.residual2 = SublayerResidual(d_model, dropout)
         self.residual3 = SublayerResidual(d_model, dropout)
 
-    def forward(self, x, cross_x, mask_x, mask_cross):
-        x = self.residual1(x, lambda x : self.self_attn(x, x, x, mask_x))
-        x = self.residual2(x, lambda x : self.cross_attn(x, cross_x, cross_x, mask_cross))
+    def forward(self, x, memory, src_mask, tgt_mask):
+        x = self.residual1(x, lambda x : self.self_attn(x, x, x, src_mask))
+        x = self.residual2(x, lambda x : self.cross_attn(x, memory, memory, tgt_mask))
         x = self.residual3(x, self.feedforward)
 
         return x
@@ -155,18 +210,20 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.layers = nn.ModuleList([decoder_layer for _ in range(n_layer)])
 
-    def forward(self, x, cross_x, mask_x, mask_cross):
+    def forward(self, x, memory, src_mask, tgt_mask):
         for layer in self.layers:
-            x = layer(x, cross_x, mask_x, mask_cross)
+            x = layer(x, memory, src_mask, tgt_mask)
         return x
 
 class PositionEncoding(nn.Module):
-    """PositionEncoding
+    """Position Encoding.
+
     Positional encoding will sum with input embedding to give input embedding order.
     Positional encoding is given by the following equation:
+    
     PE(pos, 2i)     = sin(pos / (10000 ^ (2i / d_model))) # for given position odd end even index are alternating
     PE(pos, 2i + 1) = cos(pos / (10000 ^ (2i / d_model)))
-    where pos is position in sequence and i and index in d_model.
+    where pos is position in sequence and i is index along d_model.
     
     The positional encoding implementation is a matrix of (max_len, d_model), 
     this matrix is not updated by SGD, it is implemented as a buffer of nn.Module which 
@@ -176,13 +233,13 @@ class PositionEncoding(nn.Module):
     In addition, we apply dropout to the sums of the embeddings and the positional encodings 
     in both the encoder and decoder stacks. For the base model, we use a rate of P_drop = 0.1
     """
-    def __init__(self, max_len, d_model, dropout=0.1):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
         super(PositionEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
         pe = torch.zeros(max_len, d_model, requires_grad=False)
-        pos = torch.arange(0, self.max_len).unsqueeze(1) # (max_len, 1)
-        demonitor = torch.pow(10000, torch.arange(0, self.max_len, 2) / self.d_model) # pos/demonitor is broadcastable
+        pos = torch.arange(0, max_len).unsqueeze(1) # (max_len, 1)
+        demonitor = torch.pow(10000, torch.arange(0, d_model, 2) / d_model) # pos/demonitor is broadcastable
         
         pe[:, 0::2] = torch.sin(pos / demonitor)
         pe[:, 1::2] = torch.cos(pos / demonitor)
@@ -197,29 +254,91 @@ class PositionEncoding(nn.Module):
         x = x + self.pe[:, : x.size(1)].requires_grad_(False) # max_len is much longer than t
         return self.dropout(x)
 
-def masking(seq_len):
-    """Masking of self-attention.
-    The masking has many names: causal masking, look ahead masking, subsequent masking
-    and decoder masking, etc. But the main purpose is the same, mask out after the position i 
-    to prevent leaking of future information in the transformer decoder.
-    Usually, the mask is a triangular matrix where the elements below diagnal is True and 
-    above is False. 
 
-    Args:
-        seq_len (int): sequence length 
+class Embedding(nn.Module):
+    """Embedding tokens.
+
+    Transformer is first applied to language modelling. Language has finite words and symbols,
+    therefore you could build a large vocabulary to hold them, every sentence is a combination
+    of element in the vocabulary. Every word or symbol in the vocabulary is represented by a 
+    learned vector which is called embedding, the embedding is learned through training. 
+
+    Detail 1:
+    In the embedding layers, we multiply those weights by sqrt(d_model)
     """
+    def __init__(self, vocab_size, d_model):
+        super(Embedding, self).__init__()
+        self.embedding_table = nn.Embedding(vocab_size, d_model)
 
-    mask = torch.triu(torch.ones((1, seq_len,seq_len)), diagonal=1).type(torch.int8)
-    
-    return mask == 0
-
+    def forward(self, x):
+        # x : (b, t)
+        out = self.embedding_table(x) * math.sqrt(self.d_model)
+        return out
 
 class Transformer(nn.Module):
     """Transformer.
 
+    Args:
+        encoder: Transformer encoder part consist of 6 encoder layer
+        decoder: Transformer decoder part consist of 6 decoder layer
+        src_embed_module: encoder embedding table + position encoding
+        tgt_embed_module: decoder embedding table + position encoding, if the src and tgt are different languages
     """
     
-    def __init__(self, ):
+    def __init__(self, encoder, decoder, 
+                 src_embed_module, tgt_embed_module):
         super(Transformer, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.src_embed_module = src_embed_module
+        self.tgt_embed_module = tgt_embed_module
 
+    def forward(self, x, src_mask, tgt, tgt_mask):
+        x = self.encoder(self.src_embed_module(x), src_mask)
+        x = self.decoder(self.tgt_embed_module(tgt), x, src_mask, tgt_mask)
+
+        return x
     
+
+def create_transformer(src_vocab_size, # source language vocabulary 
+                       tgt_vocab_size, # target language vocabulary
+                       d_model = 512, 
+                       d_f = 2048, 
+                       n_heads = 8,
+                       n_layer = 6,
+                       dropout = 0.1):
+    multi_head_attention = MultiHeadAttention(d_model=d_model, num_heads=n_heads, dropout=dropout)
+    feed_forward = PointwiseFeedForward(d_model=d_model, d_f=d_f)
+    position_encoding = PositionEncoding(d_model=d_model, dropout=dropout)
+
+    clone = copy.deepcopy
+
+    encoder_layer = EncoderLayer(d_model=d_model, 
+                                 multi_head_attention=clone(multi_head_attention), 
+                                 feedforward=clone(feed_forward),
+                                 dropout=dropout)
+    encoder = Encoder(encoder_layer=encoder_layer, n_layer=n_layer)
+
+    decoder_layer = DecoderLayer(d_model=d_model,
+                                 self_attn=clone(multi_head_attention),
+                                 cross_attn=clone(multi_head_attention),
+                                 feedforward=clone(feed_forward),
+                                 dropout=dropout)
+    decoder = Decoder(decoder_layer=decoder_layer, n_layer=n_layer)
+
+    transformer_model = Transformer(
+        src_embed_module=nn.Sequential(Embedding(src_vocab_size, d_model), clone(position_encoding)),
+        tgt_embed_module=nn.Sequential(Embedding(tgt_vocab_size, d_model), clone(position_encoding)),
+        encoder=encoder,
+        decoder=decoder
+    )
+
+    # This was important from their code.
+    # Initialize parameters with Glorot / fan_avg.
+    # From The Annotated Transfomer
+    for p in transformer_model.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
+
+    return transformer_model
+
