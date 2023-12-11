@@ -54,7 +54,7 @@ def attention(query, key, value, attn_mask=None, dropout=None):
     """
     
     d_k = query.size(-1)
-    score = torch.matmul(query, key.transpose(-1, -2)) / torch.sqrt(d_k) # (b, t, t)
+    score = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(d_k) # (b, t, t)
 
     if attn_mask is not None:
         # NOTE: Why set mask position to -np.inf ?
@@ -86,6 +86,7 @@ def causal_masking(seq_len):
     mask = torch.triu(torch.ones((1, seq_len,seq_len)), diagonal=1).type(torch.int8)
     
     return mask == 0
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads, dropout=0.1):
         super(MultiHeadAttention, self).__init__()
@@ -97,26 +98,23 @@ class MultiHeadAttention(nn.Module):
         self.l = nn.Linear(d_model, d_model, bias=False)
         self.dropout = nn.Dropout(dropout)
 
-    def foward(self, q, k, v, mask = None):
+    def forward(self, q, k, v, mask = None):
         # q, k, v -> (b, t, d_model)
-        b, t, _ = q.size()
+        b, t, d_model = q.size()
 
         q = self.W_q(q) # (b, t, d_model)
         k = self.W_k(k)
         v = self.W_v(v)
         
-        q = torch.split(q, self.num_heads, dim = -1) # (b, t, num_heads, d_k)
-        k = torch.split(k, self.num_heads, dim = -1)
-        v = torch.split(v, self.num_heads, dim = -1)
-
-        q = q.transpose(-2, -3) # (b, num_heads, t, d_k)
-        k = k.transpose(-2, -3)
-        v = v.transpose(-2, -3)
+        q = q.view(b, t, self.num_heads, d_model // self.num_heads).transpose(1, 2)
+        k = k.view(b, t, self.num_heads, d_model // self.num_heads).transpose(1, 2)
+        v = v.view(b, t, self.num_heads, d_model // self.num_heads).transpose(1, 2) # (b, num_heads, t, d_k)
         
         x, attn = attention(q, k, v, attn_mask=mask, dropout=self.dropout)
         # x -> (b, num_heads, t, d_k), attn -> (b, num_heads, t, t)
-        x = x.transpose(-2, -3) # -> (b, t, num_heads, d_k)
-        x = x.view(b, t, -1) # -> (b, t, num_heads * d_k)
+        x = x.transpose(1, 2) # -> (b, t, num_heads, d_k)
+        # it is necessary to add contiguous here
+        x = x.contiguous().view(b, t, d_model) # -> (b, t, num_heads * d_k)
         
         res = self.l(x) # -> (b, t, d_model)
     
@@ -254,7 +252,6 @@ class PositionEncoding(nn.Module):
         x = x + self.pe[:, : x.size(1)].requires_grad_(False) # max_len is much longer than t
         return self.dropout(x)
 
-
 class Embedding(nn.Module):
     """Embedding tokens.
 
@@ -268,6 +265,7 @@ class Embedding(nn.Module):
     """
     def __init__(self, vocab_size, d_model):
         super(Embedding, self).__init__()
+        self.d_model = d_model
         self.embedding_table = nn.Embedding(vocab_size, d_model)
 
     def forward(self, x):
@@ -307,6 +305,7 @@ def create_transformer(src_vocab_size, # source language vocabulary
                        n_heads = 8,
                        n_layer = 6,
                        dropout = 0.1):
+
     multi_head_attention = MultiHeadAttention(d_model=d_model, num_heads=n_heads, dropout=dropout)
     feed_forward = PointwiseFeedForward(d_model=d_model, d_f=d_f)
     position_encoding = PositionEncoding(d_model=d_model, dropout=dropout)
