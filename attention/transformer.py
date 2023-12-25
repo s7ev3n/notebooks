@@ -146,17 +146,21 @@ class SublayerResidual(nn.Module):
         return x + self.dropout(sublayer(self.ln(x)))
 
 class PointwiseFeedForward(nn.Module):
-    def __init__(self, d_model=512,  d_f=2048):
+    def __init__(self, d_model=512, d_f=2048, dropout=0.1):
         super(PointwiseFeedForward, self).__init__()
         self.d_model = d_model
         self.d_f = d_f
         self.fc1 = nn.Linear(d_model, d_f, bias=True)
         self.fc2 = nn.Linear(d_f, d_model, bias=True)
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
     
     def forward(self, x):
         x = self.fc1(x)
         x = self.relu(x)
+        # Note: The Annotated Transformer add a dropout here before fc2
+        # original paper seems not
+        x = self.dropout(x)
         x = self.fc2(x)
 
         return x
@@ -168,6 +172,7 @@ class EncoderLayer(nn.Module):
         self.feedforward = feedforward
         self.residual1 = SublayerResidual(d_model, dropout)
         self.residual2 = SublayerResidual(d_model, dropout)
+        self.size = d_model
 
     def forward(self, x, mask):
         x = self.residual1(x, lambda x : self.attention(x, x, x, mask))
@@ -197,11 +202,15 @@ class Encoder(nn.Module):
     def __init__(self, encoder_layer, n_layer=6):
         super(Encoder, self).__init__()
         self.layers = nn.ModuleList([encoder_layer for _ in range(n_layer)])
+        # Note: The Annotated Transformer add a layer norm here
+        # original paper seems not explictly said this layer norm
+        self.ln = nn.LayerNorm(encoder_layer.size)
 
     def forward(self, x, mask):
         for layer in self.layers:
             x = layer(x, mask)
-        return x
+        
+        return self.ln(x)
 
 class Decoder(nn.Module):
     def __init__(self, decoder_layer, n_layer=6):
