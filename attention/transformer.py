@@ -1,5 +1,6 @@
 """
 Transformer implementation for understanding and practice.
+This implementation is highly inspired by The Annotated Transformer.
 """
 
 import copy
@@ -220,10 +221,10 @@ class Decoder(nn.Module):
             x = layer(x, memory, src_mask, tgt_mask)
         return x
 
-class TransformerBlock(nn.Module):
+class TransformerEncoderBlock(nn.Module):
     """A self-contained transformer encoder block."""
     def __init__(self, n_embed, n_head, dropout):
-        super(TransformerBlock, self).__init__()
+        super(TransformerEncoderBlock, self).__init__()
         self.attention = MultiHeadAttention(n_embed, n_head, dropout)
         self.feedforward = PointwiseFeedForward(n_embed, 4 * n_embed, dropout)
         self.connection1 = SublayerResidual(n_embed, dropout)
@@ -369,3 +370,21 @@ def create_transformer(src_vocab_size, # source language vocabulary
 
     return transformer_model
 
+def test_create_transformer():
+    print("Testing create_transformer...")
+    src_vocab_size = 16
+    tgt_vocab_size = 16
+
+    model = create_transformer(src_vocab_size, tgt_vocab_size)
+    x = torch.tensor([[1, 2, 3, 4 ]])
+    y = torch.tensor([[6, 7, 8, 9 ]])
+    seq_len = x.size(1)
+    src_mask = torch.ones((seq_len, seq_len))
+    tgt_mask = causal_masking(seq_len)
+
+    out = model(x, src_mask, y, tgt_mask)
+
+    print(out)
+
+if __name__ == "__main__":
+    test_create_transformer()
