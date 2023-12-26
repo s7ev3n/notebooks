@@ -120,7 +120,6 @@ class MultiHeadAttention(nn.Module):
     
         return res 
 
-
 class SublayerResidual(nn.Module):
     def __init__(self, d_model=512, dropout=0.1):
         super(SublayerResidual, self).__init__()
@@ -180,7 +179,6 @@ class EncoderLayer(nn.Module):
 
         return x
 
-
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, self_attn, cross_attn, feedforward, dropout=0.1):
         super(DecoderLayer, self).__init__()
@@ -220,6 +218,20 @@ class Decoder(nn.Module):
     def forward(self, x, memory, src_mask, tgt_mask):
         for layer in self.layers:
             x = layer(x, memory, src_mask, tgt_mask)
+        return x
+
+class TransformerBlock(nn.Module):
+    """A self-contained transformer encoder block."""
+    def __init__(self, n_embed, n_head, dropout):
+        super(TransformerBlock, self).__init__()
+        self.attention = MultiHeadAttention(n_embed, n_head, dropout)
+        self.feedforward = PointwiseFeedForward(n_embed, 4 * n_embed, dropout)
+        self.connection1 = SublayerResidual(n_embed, dropout)
+        self.connection2 = SublayerResidual(n_embed, dropout)
+        self.size = n_embed
+    
+    def forward(self, x, mask):
+        x = self.connection2(self.connection1(x, lambda x : self.attention(x, x, x, mask)))    
         return x
 
 class PositionEncoding(nn.Module):
@@ -263,7 +275,7 @@ class PositionEncoding(nn.Module):
         x = x + self.pe[:, : x.size(1)].requires_grad_(False) # max_len is much longer than t
         return self.dropout(x)
 
-class Embedding(nn.Module):
+class WordEmbedding(nn.Module):
     """Embedding tokens.
 
     Transformer is first applied to language modelling. Language has finite words and symbols,
@@ -275,7 +287,7 @@ class Embedding(nn.Module):
     In the embedding layers, we multiply those weights by sqrt(d_model)
     """
     def __init__(self, vocab_size, d_model):
-        super(Embedding, self).__init__()
+        super(WordEmbedding, self).__init__()
         self.d_model = d_model
         self.embedding_table = nn.Embedding(vocab_size, d_model)
 
@@ -285,7 +297,10 @@ class Embedding(nn.Module):
         return out
 
 class Transformer(nn.Module):
-    """Transformer.
+    """Transformer. This is basically copy from The Annotated Transformer.
+    It implement a encoder-decoder transformer for machine translation,
+    therefore you see src embedding for one language and target embedding 
+    for another language.
 
     Args:
         encoder: Transformer encoder part consist of 6 encoder layer
@@ -317,6 +332,8 @@ def create_transformer(src_vocab_size, # source language vocabulary
                        n_layer = 6,
                        dropout = 0.1):
 
+    """Test the Transformer class."""
+
     multi_head_attention = MultiHeadAttention(d_model=d_model, num_heads=n_heads, dropout=dropout)
     feed_forward = PointwiseFeedForward(d_model=d_model, d_f=d_f)
     position_encoding = PositionEncoding(d_model=d_model, dropout=dropout)
@@ -337,8 +354,8 @@ def create_transformer(src_vocab_size, # source language vocabulary
     decoder = Decoder(decoder_layer=decoder_layer, n_layer=n_layer)
 
     transformer_model = Transformer(
-        src_embed_module=nn.Sequential(Embedding(src_vocab_size, d_model), clone(position_encoding)),
-        tgt_embed_module=nn.Sequential(Embedding(tgt_vocab_size, d_model), clone(position_encoding)),
+        src_embed_module=nn.Sequential(WordEmbedding(src_vocab_size, d_model), clone(position_encoding)),
+        tgt_embed_module=nn.Sequential(WordEmbedding(tgt_vocab_size, d_model), clone(position_encoding)),
         encoder=encoder,
         decoder=decoder
     )
