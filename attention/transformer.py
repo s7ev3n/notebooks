@@ -235,12 +235,14 @@ class PositionEncoding(nn.Module):
     The positional encoding implementation is a matrix of (max_len, d_model), 
     this matrix is not updated by SGD, it is implemented as a buffer of nn.Module which 
     is the state of of the nn.Module.
+    
+    Note: For max_len, it usually aligns with the sequence length, do not have to be 1024.
 
     Detail 1:
     In addition, we apply dropout to the sums of the embeddings and the positional encodings 
     in both the encoder and decoder stacks. For the base model, we use a rate of P_drop = 0.1
     """
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
+    def __init__(self, d_model, dropout=0.1, max_len=1024):
         super(PositionEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
