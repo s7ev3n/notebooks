@@ -232,7 +232,9 @@ class TransformerEncoderBlock(nn.Module):
         self.size = n_embed
     
     def forward(self, x, mask):
-        x = self.connection2(self.connection1(x, lambda x : self.attention(x, x, x, mask)))    
+        x = self.connection2(
+                self.connection1(x, lambda x : self.attention(x, x, x, mask)),
+                self.feedforward)    
         return x
 
 class PositionEncoding(nn.Module):
