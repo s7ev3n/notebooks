@@ -1,2 +1,0 @@
-- [ ] understand the code: reader.py dataset.py record.py tf_record.py
-- [ ] write examples to save and load the data to disk

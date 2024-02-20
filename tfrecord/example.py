@@ -30,4 +30,6 @@ if __name__ == '__main__':
 
     # Enjoy the training loop.
     for i in range(10):
-        print(output_queue.get())
+        data = output_queue.get()
+        print(type(data))
+        print(data)
