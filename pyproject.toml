@@ -9,10 +9,18 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.10"
 numpy = "^1.26.2"
-torch = { url = "https://download.pytorch.org/whl/cu117/torch-2.0.1%2Bcu117-cp310-cp310-linux_x86_64.whl" }
-torchvision = { url = "https://download.pytorch.org/whl/cu117/torchvision-0.15.2%2Bcu117-cp310-cp310-linux_x86_64.whl" }
+torch = { url = "https://download.pytorch.org/whl/cu118/torch-2.1.0%2Bcu118-cp310-cp310-linux_x86_64.whl" }
 timm = "^0.9.12"
 protobuf = "^4.25.3"
+mosec = "^0.8.4"
+transformers = "^4.38.2"
+accelerate = "^0.27.2"
+openmodelz = "^0.0.27"
+modelz-llm = {git = "https://github.com/s7ev3n/llm-serve.git"}
+tensor-parallel = "2.0.0"
+packaging = "^24.0"
+openai = "^1.13.3"
+prompttools = "^0.0.46"
 
 [build-system]
 requires = ["poetry-core"]
