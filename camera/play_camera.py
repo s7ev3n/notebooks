@@ -1,14 +1,16 @@
 import viser
 import torch
 import time
-
-from camera_model import PinholeCameraModel
+import numpy as np
 import imageio.v3 as iio
+
+from camera_model import PinholeCameraModel, CylindricalCameraModel
+from rectification import get_grid_rectification, perform_rectification
 
 fx = 1264.0
 
 def fake_camera_data():
-    image = iio.imread('./data/n015-2018-07-24-11-22-45+0800__CAM_FRONT__1532402927612460.jpg')
+    image = iio.imread('./camera/data/n015-2018-07-24-11-22-45+0800__CAM_FRONT__1532402927612460.jpg')
     # image = torch.from_numpy(image)
     image_size_hw = image.shape[:2] # (900, 1600)
     fx, fy, cx, cy = 1264.0, 1264.0, 450.0, 800.0
@@ -24,13 +26,30 @@ def fake_camera_data():
 fake_image, fake_image_size_hw, fake_intrinsics, fake_extrinsics = \
     fake_camera_data()
 
-# camera_model = PinholeCameraModel(
-#     intrinsics=fake_intrinsics.unsqueeze(0).unsqueeze(0),
-#     extrinsics=fake_extrinsics.unsqueeze(0).unsqueeze(0),
-#     image_size=fake_image_size_hw
-# )
+fake_image_cuda = torch.from_numpy(fake_image.transpose(2,0,1)).to("cuda")
+fake_intrinsics = fake_intrinsics.to("cuda")
+fake_extrinsics = fake_extrinsics.to("cuda")
 
-# sight_rays_cam = camera_model.img2cam()
+def update_focal_scaling_image(old_intrinsics, new_focal_length):
+    new_intrinsics = old_intrinsics.clone()
+    new_intrinsics[0, 0] = new_focal_length
+    new_intrinsics[1, 1] = new_focal_length
+
+    grid_uv, _, _ = get_grid_rectification(
+        fake_intrinsics,
+        fake_extrinsics,
+        PinholeCameraModel,
+        fake_image_size_hw,
+        new_intrinsics,
+        fake_extrinsics,
+        PinholeCameraModel,
+        fake_image_size_hw,
+        do_normalization=False
+    )
+
+    image_rect = perform_rectification(fake_image_cuda.float(), grid_uv)
+    
+    return image_rect.cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
 
 def main() -> None:
     server = viser.ViserServer()
@@ -53,12 +72,25 @@ def main() -> None:
                                 step=0.1,
                                 initial_value=1
                             )
-        @gui_focal_slider.on_update
-        def _(_) -> None:
-            scale = gui_focal_display.value
-            new_focal_length = fx * scale
-            gui_focal_display.value = new_focal_length
-            # 
+
+    def update_image(image = None) -> None:
+        server.scene.add_image('world/camera/image', 
+                                image if image is not None else fake_image, 
+                                8, 
+                                4.5,
+                                format='jpeg',
+                                wxyz=(1, 0, 0, 0),
+                                position=(0.0, 0.0, 1.0))
+    
+    @gui_focal_slider.on_update
+    def _(_) -> None:
+        scale = gui_focal_slider.value
+        new_focal_length = fx * scale
+        gui_focal_display.value = new_focal_length
+
+        new_image = update_focal_scaling_image(fake_intrinsics, new_focal_length)
+        update_image(new_image)
+        
 
 
     with server.gui.add_folder("Adjust Extrinsics"):
@@ -78,6 +110,15 @@ def main() -> None:
     server.scene.add_frame('world', 
                         wxyz=(1, 0, 0, 0), 
                         position=(0, 0, 0))
+    server.scene.add_grid('world/ground',
+                          width=20,
+                          height=20,
+                          width_segments=80,
+                          height_segments=80,
+                          plane='xy',
+                          wxyz=(1, 0, 0, 0),
+                          position=(0.0, 0.0, 0.0))
+    
     # NOTE: how to calculate the world/camera wxyz
     # 1. wxyz is camera rotation in world coordinate
     # 2. use Euler angles (order: XYZ) to rotate world coordinate to camera coordinate,
@@ -86,25 +127,20 @@ def main() -> None:
     # 3. Euler angle postive angle: clockwise, negative angle: counterclockwise
     server.scene.add_frame('world/camera', 
                         wxyz=( -0.5, 0.5, -0.5, 0.5),
-                        position=(3.0, 0.0, 0.0))
+                        position=(3.0, 0.0, 5.0))
     
-    server.scene.add_image('world/camera/image', 
-                           fake_image, 
-                           8, 
-                           4.5,
-                           format='jpeg',
-                           wxyz=(1, 0, 0, 0),
-                           position=(0.0, 0.0, 1.0))
+    fov = 2 * np.arctan2(900, fx)
+    aspect = 1600 / 900
+    server.scene.add_camera_frustum(
+        'world/camera/frustum',
+        fov=fov,
+        aspect=aspect,
+        scale=0.15,
+        wxyz=(1,0,0,0),
+        position=(0.0, 0.0, 0.0))
     
-    server.scene.add_grid('world/camera/grid',
-                          width=8,
-                          height=4.5,
-                          plane='xy',
-                          section_color=(255,255,255),
-                          section_thickness=2.0,
-                          section_size=0.1,
-                          wxyz=(1, 0, 0, 0),
-                          position=(0.0, 0.0, 1.0))
+    
+    update_image()
 
     while True:
         time.sleep(0.2)

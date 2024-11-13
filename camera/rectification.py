@@ -2,7 +2,7 @@ import torch
 from scipy.spatial.transform import Rotation as R
 from torch import nn
 
-from camera.camera_model import CameraModel, CylindricalCameraModel, PinholeCameraModel, SphericalCameraModel
+from camera_model import CameraModel, CylindricalCameraModel, PinholeCameraModel, SphericalCameraModel
 
 
 def normalize_rotation(
