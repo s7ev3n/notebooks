@@ -5,6 +5,8 @@ import time
 from camera_model import PinholeCameraModel
 import imageio.v3 as iio
 
+fx = 1264.0
+
 def fake_camera_data():
     image = iio.imread('./data/n015-2018-07-24-11-22-45+0800__CAM_FRONT__1532402927612460.jpg')
     # image = torch.from_numpy(image)
@@ -33,6 +35,46 @@ fake_image, fake_image_size_hw, fake_intrinsics, fake_extrinsics = \
 def main() -> None:
     server = viser.ViserServer()
 
+    # Add GUI
+    with server.gui.add_folder("Adjust Intrinsics"):
+        gui_camera_choice = server.gui.add_dropdown(
+            "Camera Model",
+            ("Pinhole", "Cylindral")
+        )
+        gui_focal_display = server.gui.add_number(
+            "Focal Length: ",
+            initial_value=fx,
+            disabled=True
+        )
+        gui_focal_slider = server.gui.add_slider(
+                                "Focal Length Scaling",
+                                min=1,
+                                max=1.5,
+                                step=0.1,
+                                initial_value=1
+                            )
+        @gui_focal_slider.on_update
+        def _(_) -> None:
+            scale = gui_focal_display.value
+            new_focal_length = fx * scale
+            gui_focal_display.value = new_focal_length
+            # 
+
+
+    with server.gui.add_folder("Adjust Extrinsics"):
+        gui_camera_tran = server.gui.add_vector3(
+            "Translation: ",
+            initial_value=(0.0, 0.0, 1.0),
+            step=0.1
+        )
+        gui_camera_rot = server.gui.add_vector3(
+            "Rotation (Euler angles (deg) XYZ ):",
+            initial_value=(0.0, 0.0, 0.0),
+            step = 1
+        )
+
+
+
     server.scene.add_frame('world', 
                         wxyz=(1, 0, 0, 0), 
                         position=(0, 0, 0))
@@ -54,6 +96,16 @@ def main() -> None:
                            wxyz=(1, 0, 0, 0),
                            position=(0.0, 0.0, 1.0))
     
+    server.scene.add_grid('world/camera/grid',
+                          width=8,
+                          height=4.5,
+                          plane='xy',
+                          section_color=(255,255,255),
+                          section_thickness=2.0,
+                          section_size=0.1,
+                          wxyz=(1, 0, 0, 0),
+                          position=(0.0, 0.0, 1.0))
+
     while True:
         time.sleep(0.2)
 
