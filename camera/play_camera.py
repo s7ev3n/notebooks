@@ -13,7 +13,7 @@ def fake_camera_data():
     image = iio.imread('./camera/data/n015-2018-07-24-11-22-45+0800__CAM_FRONT__1532402927612460.jpg')
     # image = torch.from_numpy(image)
     image_size_hw = image.shape[:2] # (900, 1600)
-    fx, fy, cx, cy = 1264.0, 1264.0, 450.0, 800.0
+    fx, fy, cx, cy = 1252.8131, 1252.8131, 826.5881, 469.9846
     intrinsics = torch.tensor([[fx , 0.0, cx],
                                [0.0, fy , cy],
                                [0.0, 0.0, 1.0]])
@@ -99,12 +99,16 @@ def main() -> None:
     def update_camera_model_switch_image(from_camera, to_camera):
         from_camera_model = camera_model_mappings[from_camera]
         to_camera_model = camera_model_mappings[to_camera]
+        
+        to_intrinsics = fake_intrinsics.clone()
+        to_intrinsics[0, 0] = torch.tensor(gui_focal_display.value, device=to_intrinsics.device)
+        to_intrinsics[1, 1] = torch.tensor(gui_focal_display.value, device=to_intrinsics.device)
         grid_uv, _, _ = get_grid_rectification(
             fake_intrinsics,
             fake_extrinsics,
             from_camera_model,
             fake_image_size_hw,
-            fake_intrinsics,
+            to_intrinsics,
             fake_extrinsics,
             to_camera_model,
             fake_image_size_hw,
