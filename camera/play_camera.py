@@ -57,15 +57,32 @@ def update_focal_scaling_image(old_intrinsics, new_focal_length):
     
     return image_rect.cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
 
-def create_arrow(start=[0,0,0], end=[0,0,1], radius=0.01, head_length=0.2, head_radius=0.05):
+def vector_to_quaternion(direction, up=[0,0,1]):
+    direction = np.array(direction)
+    up = np.array(up)
+    
+    axis = np.cross(up, direction)
+    axis_length = np.linalg.norm(axis)
+
+    if axis_length == 0:
+        return np.eye(3)
+    
+    axis = axis / axis_length
+
+    angle = np.arccos(np.dot(up, direction) / (np.linalg.norm(up) * np.linalg.norm(direction)))
+
+    return trimesh.transformations.quaternion_about_axis(angle, axis)
+
+def create_arrow(start=[0,0,0], end=[0,0,1], radius=0.02, head_length=0.2, head_radius=0.05):
 
     direction = np.array(end) - np.array(start)
     length = np.linalg.norm(direction)
     direction_normalized = direction / length
-    print(length)
+    
     cylinder = trimesh.creation.cylinder(radius=radius, height=length)
-    # cylinder.apply_translation(start + direction_normalized * (length - head_length/2))    
+    cylinder.visual.face_colors = [255, 0, 0, 255]
     cone = trimesh.creation.cone(radius=head_radius, height=head_length)
+    cone.visual.face_colors = [255, 0, 0, 255]
     cone.apply_translation(start + direction_normalized * length / 2) 
 
     arrow = trimesh.util.concatenate([cylinder, cone])
@@ -105,8 +122,8 @@ def main() -> None:
     def update_image(image = None) -> None:
         server.scene.add_image('world/camera/image', 
                                 image if image is not None else fake_image, 
-                                8, 
-                                4.5,
+                                1.2763, #8,
+                                0.7175, #4.5, 
                                 format='jpeg',
                                 wxyz=(1, 0, 0, 0),
                                 position=(0.0, 0.0, 1.0))
@@ -179,13 +196,6 @@ def main() -> None:
                           wxyz=(1, 0, 0, 0),
                           position=(0.0, 0.0, 0.0))
     
-    server.scene.add_mesh_trimesh(
-        "arrow", 
-        create_arrow(),
-        scale=1.0,
-        wxyz=(1, 0, 0, 0),
-        position=(0.0, 0.0, 2.0))
-
     # NOTE: how to calculate the world/camera wxyz
     # 1. wxyz is camera rotation in world coordinate
     # 2. use Euler angles (order: XYZ) to rotate world coordinate to camera coordinate,
@@ -196,6 +206,19 @@ def main() -> None:
                         wxyz=( -0.5, 0.5, -0.5, 0.5),
                         position=(3.0, 0.0, 5.0))
     
+    # NOTE: add the first sight ray of camera_model.img2cam() which is a homo coordinate
+    # but you can also think of it like in the Z = 1 plane in camera coordinate 
+    sight_ray_cam_np = np.array([-0.6594, -0.3747,  1.0000]) # homo
+    sight_ray_cam = torch.from_numpy(sight_ray_cam_np)# camear_model.img2cam()
+    server.scene.add_mesh_trimesh(
+        "world/camera/sight_ray", 
+        create_arrow(),
+        scale=0.5,
+        wxyz=vector_to_quaternion(sight_ray_cam),
+        position=sight_ray_cam_np
+    )
+
+
     fov = 2 * np.arctan2(900, fx)
     aspect = 1600 / 900
     server.scene.add_camera_frustum(
