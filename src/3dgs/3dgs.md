@@ -18,10 +18,16 @@ Splatting称为泼溅，是图形学中的一种渲染技术，很形象的说�
 
 
 ## 3D Gaussian Modelling
-3DGS中，使用空间中的3D Gaussian分布，对场景进行显示的建模，即
-3D Gaussian参数：3D position$x,y,z$, opacity$\alpha$, anisotropic covariance, spherical hamonic coefficients
-**场景的模型权重就是场景中的所有3D Gaussian的参数，这里没有MLP，和NeRF隐式的表征场景不一样，这里3D Gaussian本身就是场景的表示**，你可以理解这里是更灵活的、非结构化的Voxel表征。
+3DGS中，使用空间中的3D Gaussian来对场景进行显示的建模，每个3D Gaussian表示为:
+$$G(\mathbf{x_i})=o_i \cdot e^{-\frac{1}{2}(\mathbf{x_i}-\mu_i)^T\Sigma_{i}^{-1}(\mathbf{x_i}-\mu_i)}$$
 
+其中，$\mathbf{x_i}$表示的是需要渲染的像素点的坐标位置(归一化到$(-1,1)$区间)，$\mu$ 表示平均值，即3D Gaussian的中心位置，$\Sigma$表示的是多元高斯分布的协方差矩阵。$o_i$表示的是不透明度(opacity)，注意$o_i$同样定义在3D空间中，在进行alpha blending渲染时，需要转换到2D平面。
+
+除了3D Gaussian的参数$\mu$，$\alpha$和$\Sigma$外，渲染时对颜色的建模采用的是称为球谐函数(spherical harmonic coefficients)的参数，场景中的所有3D Gaussian的参数构成了模型训练的权重参数。
+
+> 注意：<ins>**场景的模型权重就是场景中的所有3D Gaussian的参数，这里没有MLP，和NeRF隐式的表征场景不一样，这里3D Gaussian参数本身就是场景的权重参数**，你可以理解这里是更灵活的、非结构化的Voxel表征。</ins>
+
+### 3D Gaussian参数各项
 
 ##  Rasterizer
 
