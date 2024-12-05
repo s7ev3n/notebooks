@@ -34,3 +34,28 @@ $$G(\mathbf{x_i})=o_i \cdot e^{-\frac{1}{2}(\mathbf{x_i}-\mu_i)^T\Sigma_{i}^{-1}
 ### Volume Rendering
 
 $C = \sum_{i=1}^{N}  \cdot c_i \cdot \alpha_i \cdot \prod_{j=1}^{i-1}(1-\alpha_j)$
+
+### Jacobian
+在EWA volume splatting方法中，计算Jacobian的过程是为了近似非线性透视投影变换。Jacobian是一个矩阵，它包含了变换的一阶偏导数信息，用于描述在局部区域内，一个函数如何将一个空间映射到另一个空间。在EWA volume splatting中，Jacobian用于将重建核（reconstruction kernel）从相机空间（camera space）映射到光线空间（ray space）。
+
+具体来说，Jacobian的计算如下：
+
+1. **定义Jacobian矩阵**：Jacobian矩阵 $J_k$ 是在相机空间中某点 $u_k$ 处的透视投影变换的偏导数矩阵。这个矩阵描述了从相机空间到图像空间的局部线性近似。
+
+2. **计算Jacobian矩阵的元素**：Jacobian矩阵 $J_k$ 的元素是通过在点 $u_k$ 处对透视投影变换 $Pi$ 的偏导数来计算的。对于一个给定的相机空间坐标 $u_k = (u_{k0}, u_{k1}, u_{k2})$，Jacobian矩阵$J_k$ 可以表示为：
+$$
+   J_k = \begin{bmatrix}
+   \frac{1}{u_{k2}} & 0 & -\frac{u_{k0}}{u_{k2}^2} \\
+   0 & \frac{1}{u_{k2}} & -\frac{u_{k1}}{u_{k2}^2} \\
+   \frac{u_{k0}}{\|u_k\| u_{k2}} & \frac{u_{k1}}{\|u_k\| u_{k2}} & \frac{u_{k2}}{\|u_k\| u_{k2}}
+   \end{bmatrix}
+$$
+其中 $\|u_k\|$ 是 $u_k$ 的欧几里得范数，即 $\sqrt{u_{k0}^2 + u_{k1}^2 + u_{k2}^2}$。
+
+1. **使用Jacobian矩阵**：在EWA volume splatting中，Jacobian矩阵$J_k$ 用于将重建核从相机空间变换到光线空间。这个变换涉及到将重建核的方差矩阵$V_k$从对象空间变换到光线空间，得到新的方差矩阵$V'_k$，计算公式为：
+$$
+   V'_k = J_k W V''_k W^T J_k^T
+$$
+其中 $W$ 是视图变换中旋转部分的3x3矩阵，$V''_k$ 是对象空间中重建核的3x3方差矩阵。
+
+通过上述步骤，EWA volume splatting方法能够有效地处理透视投影带来的采样率变化问题，从而减少混叠（aliasing）伪影，并提高体积渲染的质量。
