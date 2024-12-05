@@ -1,4 +1,5 @@
 import numpy as np
+from PIL import Image
 from typing import List 
 
 
@@ -115,8 +116,8 @@ class Camera:
 
     def camera_to_image(self, points_camera_N3):
         points_image_3N = self.intrinsics_33 @ points_camera_N3.T
-        points_image_homo_N2 = (points_image_3N[:2, :] / points_image_3N[2, :]).T
-        return points_image_homo_N2
+        points_image_N2 = (points_image_3N[:2, :] / points_image_3N[2, :]).T
+        return points_image_N2
 
     @property    
     def camera_to_image_matrix(self):
@@ -127,8 +128,8 @@ class Camera:
         if self.normalize_grid:
             h, w = self.image_size_hw
             half_w, half_h = w/2, h/2
-            points_image_N2[:, 0] = (points_image_N2[:, 0] - half_h) / half_h
-            points_image_N2[:, 1] = (points_image_N2[:, 1] - half_w) / half_w
+            points_image_N2[:, 0] = (points_image_N2[:, 0] - half_w) / half_w
+            points_image_N2[:, 1] = (points_image_N2[:, 1] - half_h) / half_h
         return points_image_N2
     
     @property
@@ -164,8 +165,8 @@ class GaussianRaterizer:
         T = np.ones((1, *self.camera.image_size_hw))
         for mean_2d, cov_2d, color, opacity in zip(mean2d_N2, cov2d_N22, colors_N0, opacity_N0):
             alpha = self._compute_alpha(opacity, mean_2d, cov_2d)
-            image += color[..., None, None] * alpha * T 
-            T *= (1 - alpha)
+            image += T * alpha * color[..., None, None]
+            T = T*(1 - alpha)
         
         self.camera.set_image(image)
 
@@ -179,7 +180,7 @@ class GaussianRaterizer:
         '''
         
         jacobian = self.compute_Jocobian(mean3d_N3)
-        R = self.camera.world_to_image_matrix[:3, :3]
+        R = self.camera.world_to_camera_matrix[:3, :3]
         return jacobian @ R[None, ...] @ cov3d_N33 @ R.T[None, ...] @ jacobian.swapaxes(1, 2)
 
     def compute_Jocobian(self, mean3d_N3):
@@ -208,12 +209,12 @@ def fake_gaussians(num=3):
     gaussians = []
     for i in range(num):
         g = Gaussian3D.create_from(
-            mean=np.array([1, 0, (i+1)]),
-            opacity=np.random.rand(),
+            mean=np.array([(i + 1)**2, 0, 0]),
+            opacity=np.array([0.7]),
             covariance=np.array([*np.random.rand(3), 1, 0, 0, 0]),
             color=colors[i%3]
         )
-        
+
         gaussians.append(g)
     
     return gaussians
@@ -224,10 +225,10 @@ if __name__ == '__main__':
                            [0.0, fy , cy],
                            [0.0, 0.0, 1.0]])
     extrinsics = np.zeros((4,4))
-    extrinsics[:3, :3] = np.array([[  0.0000000,  0.0000000,  1.0000000],
-                                    [-1.0000000,  0.0000000,  0.0000000],
-                                    [0.0000000, -1.0000000,  0.0000000 ]])
-    extrinsics[:3, 3] = np.array([5, 1, 5])
+    extrinsics[:3, :3] = np.array([[ 0.0,  -1.0,  0.0],
+                                   [ 0.0,  0.0,  -1.0],
+                                   [ 1.0, 0.0,  0.0]])
+    extrinsics[:3, 3] = np.array([0, 0, 0])
     camera = Camera(
         intrinsics=intrinsics,
         extrinsics=extrinsics,
@@ -235,4 +236,8 @@ if __name__ == '__main__':
     )
     gaussians = fake_gaussians()
     raterizer = GaussianRaterizer(camera)
-    image = raterizer.alpha_blending_render(gaussians)
+    image = 255 * raterizer.alpha_blending_render(gaussians)
+    # save image
+    image = image.transpose(1, 2, 0)
+    image = Image.fromarray(image.astype('uint8'))
+    image.save('output.png')
