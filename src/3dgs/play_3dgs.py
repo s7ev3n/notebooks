@@ -7,12 +7,12 @@ class Gaussian3D:
         self.init_default()
 
     def init_default(self):
-        self._mean = np.zeros(3,)
-        self._opacity = np.array(0.)
+        self._mean = np.zeros(3,)[..., None]
+        self._opacity = np.zeros(1,)[..., None]
         scale = [1.0, 1.0, 1.0]
         quaternion = [1.0, 0.0, 0.0, 0.0]
-        self._covariance = np.array(scale.extend(quaternion))
-        self._color = np.array([0., 0., 0.]) # TODO: use spher harmonic to represent color
+        self._covariance = np.array(scale.extend(quaternion))[..., None]
+        self._color = np.array([0., 0., 0.])[..., None] # TODO: use spher harmonic to represent color
     
     def set_mean(self, mean):
         self._mean = mean
@@ -124,6 +124,11 @@ class Camera:
 
     def world_to_image(self, points_world_N4):
         points_image_N2 = self.camera_to_image(self.world_to_camera(points_world_N4))
+        if self.normalize_grid:
+            h, w = self.image_size_hw
+            half_w, half_h = w/2, h/2
+            points_image_N2[:, 0] = (points_image_N2[:, 0] - half_h) / half_h
+            points_image_N2[:, 1] = (points_image_N2[:, 1] - half_w) / half_w
         return points_image_N2
     
     @property
@@ -174,8 +179,8 @@ class GaussianRaterizer:
         '''
         
         jacobian = self.compute_Jocobian(mean3d_N3)
-        world_to_image_transform = self.camera.world_to_image_matrix[:3, :3]
-        return jacobian @ world_to_image_transform[None, ...] @ cov3d_N33 @ world_to_image_transform.T @ jacobian.T
+        R = self.camera.world_to_image_matrix[:3, :3]
+        return jacobian @ R[None, ...] @ cov3d_N33 @ R.T[None, ...] @ jacobian.swapaxes(1, 2)
 
     def compute_Jocobian(self, mean3d_N3):
         '''
@@ -203,7 +208,7 @@ def fake_gaussians(num=3):
     gaussians = []
     for i in range(num):
         g = Gaussian3D.create_from(
-            mean=np.array([*np.random.rand(3)]),
+            mean=np.array([1, 0, (i+1)]),
             opacity=np.random.rand(),
             covariance=np.array([*np.random.rand(3), 1, 0, 0, 0]),
             color=colors[i%3]
@@ -218,8 +223,11 @@ if __name__ == '__main__':
     intrinsics = np.array([[fx , 0.0, cx],
                            [0.0, fy , cy],
                            [0.0, 0.0, 1.0]])
-    extrinsics = np.eye(4)
-    extrinsics[:3, 3] = np.array([0., 0., -3.0])
+    extrinsics = np.zeros((4,4))
+    extrinsics[:3, :3] = np.array([[  0.0000000,  0.0000000,  1.0000000],
+                                    [-1.0000000,  0.0000000,  0.0000000],
+                                    [0.0000000, -1.0000000,  0.0000000 ]])
+    extrinsics[:3, 3] = np.array([5, 1, 5])
     camera = Camera(
         intrinsics=intrinsics,
         extrinsics=extrinsics,
