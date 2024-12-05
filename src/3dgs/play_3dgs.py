@@ -73,11 +73,12 @@ class Gaussian3D:
         return R
     
 class Camera:
-    def __init__(self, intrinsics, extrinsics, image_size_hw) -> None:
+    def __init__(self, intrinsics, extrinsics, image_size_hw, normalize_grid=True) -> None:
         self.intrinsics_33 = intrinsics
         self.extrinsics_44 = extrinsics
         self.image_size_hw = image_size_hw
-        self.grid = self._build_grid()
+        self.normalize_grid = normalize_grid # return image grid normalized to [-1, 1]
+        self.grids = self._build_grid(self.normalize_grid)
         self._image = np.zeros((3, *self.image_size_hw))
 
     def set_image(self, image):
@@ -86,23 +87,18 @@ class Camera:
     def get_image(self):
         return self._image
     
-    def _build_grid(self):
+    def _build_grid(self, normalize_grid=True):
         h, w = self.image_size_hw
         offset = 0.5
         w_range = offset + np.linspace(0, w-1, w)
         h_range = offset + np.linspace(0, h-1, h)
-        ww, hh = np.meshgrid(w_range, h_range, indexing='ij')
-        grid_HW2 = np.stack((ww, hh), axis=-1) 
+        if normalize_grid:
+            half_w, half_h = w/2, h/2
+            w_range = (w_range - half_w) / half_w
+            h_range = (h_range - half_h) / half_h
+        hh, ww = np.meshgrid(h_range, w_range, indexing='ij')
+        grid_HW2 = np.stack((hh, ww), axis=-1) 
         return grid_HW2
-    
-    def grid_norm(self):
-        # normalize grid coordinates to (-1, 1)
-        half_h = self.image_size_hw[0] / 2
-        half_w = self.image_size_hw[1] / 2
-        grid_h_HW1 = (self.grid[:,:,1] - half_h) / half_h
-        grid_w_HW1 = (self.grid[:,:,0] - half_w) / half_w
-        grid_norm_HW2 = np.concatenate((grid_h_HW1, grid_w_HW1), dim=1)
-        return grid_norm_HW2
     
     def world_to_camera(self, points_world_N4):
         # project points in world coordinate to camera coordinate using extrinsics
@@ -143,48 +139,49 @@ class GaussianRaterizer:
     def __init__(self, camera: Camera) -> None:
         self.camera = camera
     
-    def _compute_alpha(self, opacity, x2d_mean, cov2d):
-        x = self.camera.grid_norm
-        alpha = opacity * np.exp(-0.5 * (x-x2d_mean).T @ np.linalg.inv(cov2d) @ (x - x2d_mean))
-        return alpha
+    def _compute_alpha(self, opacity, xmean2d_20, cov2d_22):
+        x_HW2 = self.camera.grids
+        d_HW2 = x_HW2-xmean2d_20[None, None,...]
+        alpha_1HW = opacity[None, None, ...] * np.exp(-0.5 * d_HW2[..., None, :] @ np.linalg.inv(cov2d_22) @ d_HW2[..., None]).squeeze()
+        return alpha_1HW
 
     def alpha_blending_render(self, gaussians: List[Gaussian3D]):
         # sort gaussians by depth, i.e. z
         gaussians = sorted(gaussians, key=lambda x : x.get_mean()[2])
-        cov3ds = np.vstack([g.covariance_matrix()[None, ...] for g in gaussians])
-        mean3ds = np.vstack([g.get_mean() for g in gaussians])
-        mean2ds = self.camera.world_to_image(mean3ds)
-        cov2ds = self.to_covariance_2d(mean3ds, cov3ds)[:2, :2]
-        colors = np.vstack([g.get_color() for g in gaussians])
-        opacities = np.vstack([g.get_opacity() for g in gaussians])
+        cov3d_N33 = np.vstack([g.covariance_matrix()[None, ...] for g in gaussians])
+        mean3d_N3 = np.vstack([g.get_mean() for g in gaussians])
+        mean2d_N2 = self.camera.world_to_image(mean3d_N3)
+        cov2d_N22 = self.to_covariance_2d(mean3d_N3, cov3d_N33)[:, :2, :2]
+        colors_N0 = np.vstack([g.get_color() for g in gaussians])
+        opacity_N0 = np.vstack([g.get_opacity() for g in gaussians])
 
         image = self.camera.get_image() # empty image
         T = np.ones((1, *self.camera.image_size_hw))
-        for mean_2d, cov_2d, color, opacity in zip(mean2ds, cov2ds, colors, opacities):
+        for mean_2d, cov_2d, color, opacity in zip(mean2d_N2, cov2d_N22, colors_N0, opacity_N0):
             alpha = self._compute_alpha(opacity, mean_2d, cov_2d)
-            image += color * alpha * T 
+            image += color[..., None, None] * alpha * T 
             T *= (1 - alpha)
         
         self.camera.set_image(image)
 
         return image
 
-    def to_covariance_2d(self, mean_3d, cov_3d):
+    def to_covariance_2d(self, mean3d_N3, cov3d_N33):
         '''
         Project covariance 3d to 2d:
         $\Sigma_{2D} = JW \Sigma_{3D} W^TJ^T$
         J is Jacobian of the affine approximation of the projective transformation.
         '''
         
-        jacobian = self.compute_Jocobian(mean_3d)
+        jacobian = self.compute_Jocobian(mean3d_N3)
         world_to_image_transform = self.camera.world_to_image_matrix[:3, :3]
-        return jacobian @ world_to_image_transform[None, ...] @ cov_3d @ world_to_image_transform.T @ jacobian.T
+        return jacobian @ world_to_image_transform[None, ...] @ cov3d_N33 @ world_to_image_transform.T @ jacobian.T
 
-    def compute_Jocobian(self, means_3d):
+    def compute_Jocobian(self, mean3d_N3):
         '''
         Compute the Jacobian of the affine approximation of the projective transformation.
         '''
-        t = self.camera.world_to_camera(means_3d)
+        t = self.camera.world_to_camera(mean3d_N3)
         l = np.linalg.norm(t, axis=1, keepdims=True).flatten()
         # Compute the jacobian according to (29) from EWA Volume Splatting M.Zwicker et. al (2001)
         jacobian = np.zeros((t.shape[0], 3, 3))
@@ -206,8 +203,8 @@ def fake_gaussians(num=3):
     gaussians = []
     for i in range(num):
         g = Gaussian3D.create_from(
-            mean=np.array([0, 0, np.random.rand()]),
-            opacity=np.random.rand(1,),
+            mean=np.array([*np.random.rand(3)]),
+            opacity=np.random.rand(),
             covariance=np.array([*np.random.rand(3), 1, 0, 0, 0]),
             color=colors[i%3]
         )
